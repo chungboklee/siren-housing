@@ -8,6 +8,7 @@ const categories = { monthly: '월세 지원', moving: '이사비 지원', renta
 const now = new Date();
 const publicOrigin = process.env.SIREN_SITE_URL;
 const origin = publicOrigin ? httpsUrl(publicOrigin).origin : 'http://127.0.0.1:4173';
+const verifiedOrigin = 'https://siren-housing.siren-kr.workers.dev';
 const email = process.env.SIREN_EMAIL_SUBSCRIBE_URL;
 const notices = JSON.parse(await readFile(new URL('../data/notices.json', import.meta.url), 'utf8'));
 const dist = new URL('../dist/', import.meta.url);
@@ -65,6 +66,10 @@ if (email) httpsUrl(email);
 
 function page({ heading, summary, route, body }) {
   const canonical = publicOrigin ? `<link rel="canonical" href="${escape(origin + route)}">` : '<meta name="robots" content="noindex">';
+  const verification = origin === verifiedOrigin && route === '/'
+    ? `<meta name="google-site-verification" content="aS64T4W4MQjEji0JKbEtHKuX8DraOS70bNURQCgNlQE">
+  <meta name="naver-site-verification" content="a7bf08f23b3a75b769bc6d89c729947d8a22dc72">`
+    : '';
   return `<!doctype html>
 <html lang="ko">
 <head>
@@ -74,6 +79,7 @@ function page({ heading, summary, route, body }) {
   <meta name="theme-color" content="#ffffff">
   <title>${escape(heading)}</title>
   ${canonical}
+  ${verification}
   <link rel="alternate" type="application/rss+xml" title="${title} RSS" href="/rss.xml">
   <link rel="stylesheet" href="/assets/styles.css">
   <script type="module" src="/assets/filter.mjs"></script>
