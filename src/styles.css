@@ -109,6 +109,7 @@ h1, h2 { line-height: 1.34; word-break: keep-all; }
 .status { display: inline-flex; align-items: center; width: max-content; border-radius: 1rem; padding: .13rem .56rem; background: #f1f3f1; color: #4d5850; font-size: .8rem; font-weight: 700; white-space: nowrap; }
 .status[data-state='open'] { background: var(--green-soft); color: var(--green); }
 .status[data-state='upcoming'] { background: #f3f5ed; color: #465735; }
+.status[data-state='check'] { background: #f8f3e8; color: #684f22; }
 .chevron { display: block; width: .43rem; height: .43rem; margin-left: auto; border-right: 1.5px solid var(--muted); border-top: 1.5px solid var(--muted); transform: rotate(45deg); }
 .empty { margin-top: 1.75rem; color: var(--muted); }
 
