@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile, copyFile, rm } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { compareSchedules, noticeState, states } from '../src/schedule.mjs';
+import { applicationChannels, audiences } from '../src/eligibility.mjs';
 
 const title = '사이렌 주거';
 const description = '지자체 청년 월세·이사비·보증금 이자·임대주택 공고를 지역별로 찾고 공식 신청 일정을 확인하세요.';
@@ -19,6 +20,7 @@ const email = process.env.SIREN_EMAIL_SUBSCRIBE_URL;
 const notices = JSON.parse(await readFile(new URL('../data/notices.json', import.meta.url), 'utf8'));
 const dist = new URL('../dist/', import.meta.url);
 const slugs = new Set();
+const feedRegions = Object.keys(regions).filter(region => region !== 'national');
 
 function httpsUrl(value) {
   const url = new URL(value);
@@ -91,6 +93,17 @@ for (const notice of notices) {
   }
   httpsUrl(notice.source);
   if (notice.scheduleSource) httpsUrl(notice.scheduleSource);
+  const info = notice.application;
+  if (info) {
+    if (info.applicationUrl) httpsUrl(info.applicationUrl);
+    if (info.detailSource) httpsUrl(info.detailSource);
+    if ((info.age && (!Array.isArray(info.age) || info.age.length !== 2 || !info.age.every(Number.isInteger) || info.age[0] > info.age[1])) ||
+        (info.channels && !info.channels.every(channel => Object.hasOwn(applicationChannels, channel))) ||
+        (info.audiences && !info.audiences.every(group => Object.hasOwn(audiences, group))) ||
+        ['steps', 'documents', 'conditions'].some(key => info[key] && (!Array.isArray(info[key]) || !info[key].every(item => typeof item === 'string' && item.trim())))) {
+      throw new Error(`Invalid application details: ${notice.slug}`);
+    }
+  }
   slugs.add(notice.slug);
 }
 if (email) httpsUrl(email);
@@ -127,12 +140,15 @@ function page({ heading, summary, route, body }) {
 }
 
 function noticeRow(notice) {
-  return `<article class="notice" data-region="${notice.region}" data-locality="${escape(locality(notice))}" data-category="${notice.category}">
+  const { age, audiences: groups, channels } = notice.application ?? {};
+  const keywords = [notice.summary, ...notice.criteria, ...(groups ?? []).map(key => audiences[key]), ...(channels ?? []).map(key => applicationChannels[key])].join(' ');
+  return `<article class="notice" data-region="${notice.region}" data-locality="${escape(locality(notice))}" data-category="${notice.category}" data-age="${age?.join(',') ?? ''}" data-audiences="${groups?.join(',') ?? ''}" data-channels="${channels?.join(',') ?? ''}" data-updated="${notice.updatedOn}" data-keywords="${escape(keywords)}">
     <a class="notice-link" href="${path(notice)}" aria-labelledby="${notice.slug}-title">
       <div class="notice-main">
         <p class="notice-category">${escape(locationLabel(notice))} · ${categories[notice.category]}</p>
         <h2 id="${notice.slug}-title">${escape(notice.title)}</h2>
-        <p class="benefit">${escape(notice.benefit)}</p>
+        <p class="benefit">${escape(notice.benefit)}${age ? ` · 만 ${age[0]}~${age[1]}세` : ''}</p>
+        <p class="notice-age-unknown" hidden>연령 조건은 공고에서 확인</p>
       </div>
       <div class="notice-schedule">${status(notice)}${notice.closes ? `<span class="deadline"><span class="sr-only">공고상 마감일 </span>${dateTime(notice.closes, false)}</span>` : ''}</div>
       <span class="chevron" aria-hidden="true"></span>
@@ -140,9 +156,33 @@ function noticeRow(notice) {
   </article>`;
 }
 
-function select(label, name, choices, anyLabel) {
+function select(label, name, choices, anyLabel, visible = false) {
   const options = Object.entries(choices).map(([value, text]) => `<option value="${escape(value)}">${escape(text)}</option>`).join('');
-  return `<div class="field"><label class="sr-only" for="filter-${name}">${label}</label><select id="filter-${name}" name="${name}"><option value="">${anyLabel}</option>${options}</select></div>`;
+  return `<div class="field"><label${visible ? '' : ' class="sr-only"'} for="filter-${name}">${label}</label><select id="filter-${name}" name="${name}"><option value="">${anyLabel}</option>${options}</select></div>`;
+}
+
+function applicationDetails(notice) {
+  const { method, applicationUrl, steps, documents, selection, announcement, contact, conditions, detailSource } = notice.application ?? {};
+  const list = (items, tag) => `<${tag} class="criteria">${items.map(item => `<li>${escape(item)}</li>`).join('')}</${tag}>`;
+  const detailsLink = applicationUrl ? ` <a href="${escape(applicationUrl)}">공식 접수처 ↗</a>` : '';
+  return `
+    <section class="application-section" aria-labelledby="how-to-apply">
+      <h2 id="how-to-apply">신청 방법과 절차</h2>
+      ${method ? `<p>${escape(method)}${detailsLink}</p>` : ''}
+      ${steps?.length ? list(steps, 'ol') : ''}
+      ${method || steps?.length ? '' : '<p>접수처와 신청 절차는 공식 공고에서 확인하세요.</p>'}
+    </section>
+    <section class="application-section" aria-labelledby="documents">
+      <h2 id="documents">주요 제출 서류</h2>
+      ${documents?.length ? list(documents, 'ul') + '<p class="note">전체 서류와 발급 기준은 공식 공고에서 확인하세요.</p>' : '<p>제출 서류와 서식은 공식 공고에서 확인하세요.</p>'}
+    </section>
+    ${selection || announcement || contact ? `<dl class="application-meta">
+      ${selection ? `<div><dt>선정 기준</dt><dd>${escape(selection)}</dd></div>` : ''}
+      ${announcement ? `<div><dt>결과 발표</dt><dd>${escape(announcement)}</dd></div>` : ''}
+      ${contact ? `<div><dt>문의</dt><dd>${escape(contact)}</dd></div>` : ''}
+    </dl>` : ''}
+    ${conditions?.length ? `<section class="application-section"><h2>추가로 확인할 조건</h2>${list(conditions, 'ul')}</section>` : ''}
+    ${detailSource && detailSource !== applicationUrl ? `<p class="note"><a href="${escape(detailSource)}">공식 신청 안내 및 서류 확인 ↗</a></p>` : ''}`;
 }
 
 const regionChoices = {};
@@ -165,15 +205,28 @@ await emit('index.html', page({ heading: `청년 주거지원 공고 | ${title}`
   <main class="wrap programs" id="main">
     <section id="programs" aria-labelledby="program-title">
       <h1 id="program-title">청년 주거지원</h1>
-      <form class="filters" id="filters" hidden aria-label="공고 필터">${select('지역 및 시·군·구', 'region', regionChoices, '모든 지역')}${select('지원 유형', 'category', categories, '모든 지원')}${select('접수 상태', 'status', states, '접수 상태')}</form>
-      <span class="sr-only" id="results" aria-live="polite">${notices.length}건</span>
+      <form id="filters" hidden aria-label="공고 필터">
+        <div class="search-field"><label class="sr-only" for="notice-search">공고 검색</label><input id="notice-search" name="q" type="search" maxlength="80" placeholder="공고명 또는 지역 검색"></div>
+        <div class="filters">${select('지역 및 시·군·구', 'region', regionChoices, '모든 지역')}${select('지원 유형', 'category', categories, '모든 지원')}${select('접수 상태', 'status', states, '접수 상태')}</div>
+        <details class="advanced-filters" id="advanced-filters">
+          <summary>상세 조건</summary>
+          <div class="advanced-fields">
+            <div><label for="filter-age">만 나이</label><input id="filter-age" type="number" min="0" max="120" step="1" inputmode="numeric" name="age" placeholder="예: 29"></div>
+            ${select('공고에 명시된 대상', 'audience', audiences, '전체', true)}
+            ${select('신청 방법', 'channel', applicationChannels, '전체', true)}
+            ${select('공고 일정', 'timing', { closing: '7일 내 마감', recent: '최근 14일 등록·변경' }, '전체', true)}
+          </div>
+          <p class="filter-help">연령이 확인되지 않은 공고도 표시합니다. 대상과 신청 방법은 공고에 명시된 항목으로 검색합니다.</p>
+        </details>
+        <div class="filter-results"><span id="results" aria-live="polite">${notices.length}건</span><button type="reset">초기화</button></div>
+      </form>
       <p class="empty" id="empty-region" hidden>이 지역에 등록된 지자체 공고가 없어요.</p>
       <p class="empty" id="empty" hidden>조건에 맞는 공고가 없어요.</p>
       <div class="notice-list" id="notices">${ordered.map(noticeRow).join('')}</div>
     </section>
     <section class="subscribe" id="subscribe" aria-labelledby="subscribe-title">
       <h2 id="subscribe-title">새 공고 구독</h2>
-      <div class="feed-links"><a href="/rss.xml">전체 RSS</a><a href="/rss/seoul.xml">서울 RSS</a><a href="/rss/busan.xml">부산 RSS</a>${email ? `<a href="${escape(email)}">이메일</a>` : ''}</div>
+      <div class="feed-links"><a href="/rss.xml">전체 RSS</a><details><summary>지역별 RSS</summary><div class="regional-feeds">${feedRegions.map(region => `<a href="/rss/${region}.xml">${regions[region]} RSS</a>`).join('')}</div></details>${email ? `<a href="${escape(email)}">이메일</a>` : ''}</div>
     </section>
   </main>` }));
 
@@ -189,11 +242,12 @@ for (const notice of notices) {
         <h2>신청 대상</h2><ul class="criteria">${notice.criteria.map(item => `<li>${escape(item)}</li>`).join('')}</ul>
         <p class="note">${escape(notice.note)}</p>
         <div class="source-links"><a class="action" href="${escape(notice.source)}">공식 공고 보기 <span aria-hidden="true">↗</span></a>${notice.scheduleSource ? `<a href="${escape(notice.scheduleSource)}">공식 접수 일정 확인 ↗</a>` : ''}</div>
+        ${applicationDetails(notice)}
       </article>
     </main>` }));
 }
 
-for (const [region, file] of [['all', 'rss.xml'], ['seoul', 'rss/seoul.xml'], ['busan', 'rss/busan.xml']]) {
+for (const [region, file] of [['all', 'rss.xml'], ...feedRegions.map(region => [region, `rss/${region}.xml`])]) {
   const name = region === 'all' ? '전체' : regions[region];
   const items = notices.filter(notice => region === 'all' || notice.region === region || notice.region === 'national')
     .sort((first, second) => second.updatedOn.localeCompare(first.updatedOn))
@@ -204,7 +258,7 @@ for (const [region, file] of [['all', 'rss.xml'], ['seoul', 'rss/seoul.xml'], ['
 await emit('robots.txt', publicOrigin ? `User-agent: *\nAllow: /\nSitemap: ${origin}/sitemap.xml\n` : 'User-agent: *\nDisallow: /\n');
 await emit('sitemap.xml', `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${origin}/</loc></url>${notices.map(notice => `<url><loc>${origin}${path(notice)}</loc><lastmod>${notice.updatedOn}</lastmod></url>`).join('')}</urlset>`);
 await mkdir(new URL('assets/', dist), { recursive: true });
-for (const asset of ['styles.css', 'filter.mjs', 'schedule.mjs']) {
+for (const asset of ['styles.css', 'filter.mjs', 'schedule.mjs', 'eligibility.mjs']) {
   await copyFile(new URL(`../src/${asset}`, import.meta.url), new URL(`assets/${asset}`, dist));
 }
-console.log(`Built ${notices.length} notices and 3 RSS feeds.`);
+console.log(`Built ${notices.length} notices and ${feedRegions.length + 1} RSS feeds.`);

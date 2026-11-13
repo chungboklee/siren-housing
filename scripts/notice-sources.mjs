@@ -1,4 +1,5 @@
 import { load } from 'cheerio';
+import { applicationFromLines, channelsFrom } from './application-details.mjs';
 
 export const clean = value => value.replace(/\s+/g, ' ').trim();
 const text = element => clean(element.text());
@@ -75,6 +76,34 @@ function supportDetails(lines) {
   };
 }
 
+function incheonApplication($, detail) {
+  const app = applicationFromLines(detail.find('li').map((_, li) => text($(li))).get());
+  const blocks = detail.find('li').filter((_, li) => $(li).children('strong').length);
+  const steps = blocks.filter((_, li) => /^추진절차/.test(text($(li).children('strong').first())))
+    .find('li').map((_, li) => text($(li)).replace(/^\d+단계\s*/, '')).get();
+  const documents = blocks.filter((_, li) => /^(?:추진|제출|구비)서류/.test(text($(li).children('strong').first())))
+    .find('li').map((_, li) => text($(li))).get()
+    .filter(entry => /\((?:필수|선택)\)$/.test(entry) && entry.length <= 130);
+  if (steps.length > 1 && steps.length <= 8 && steps.every(step => step && step.length <= 170)) app.steps = steps;
+  if (documents.length && documents.length <= 14) app.documents = documents;
+  return app;
+}
+
+function jejuApplication(lines) {
+  const app = applicationFromLines(lines);
+  const start = lines.findIndex(line => /^(?:[가-하]\.|○)\s*신청접수\s*[:：]/.test(line));
+  if (start < 0) return app;
+  const first = lines.slice(start + 1, start + 4);
+  const method = first.find(line => /^1\)\s*(?:현장|방문|온라인|이메일|우편)/.test(line));
+  const channels = channelsFrom(method);
+  if (channels.length) Object.assign(app, { method: method.replace(/^1\)\s*/, ''), channels });
+  const initial = first.find(line => /^2\)\s*본인 확인 서류.*동의서/.test(line));
+  if (initial) app.documents = ['본인 확인 서류', '공급 신청서', '개인정보 동의서'];
+  const subsequent = lines.slice(start + 1).find(line => /^(?:[가-하]\.|○)\s*서류제출대상자\s*발표/.test(line));
+  if (subsequent) app.steps = ['공고에 안내된 방법으로 신청합니다.', '서류 제출 대상 발표를 확인합니다.', '대상자로 선정된 경우 별도 기간에 추가 증빙을 제출합니다.'];
+  return app;
+}
+
 export const sources = [
   {
     key: 'seoul', region: 'seoul', agency: '서울 청년몽땅정보통', host: 'youth.seoul.go.kr', idParam: 'sprtInfoId',
@@ -89,11 +118,11 @@ export const sources = [
     detail($) {
       const title = text($('.feed-view .overview .tit strong').first());
       const support = $('.feed-view .overview .info li').filter((_, li) => text($(li).find('em')) === '신청기간').first();
-      const lines = $('.feed-view .detail .editor-text p').map((_, p) => text($(p))).get();
+      const lines = $('.feed-view .detail .editor-text p').map((_, p) => text($(p))).get().filter(Boolean);
       const schedule = schedules(lines, yearFrom(title));
       const structured = period(text(support.clone().find('em').remove().end()), yearFrom(title));
       if (structured?.closes.includes('T00:00:00')) structured.closes = structured.closes.slice(0, 10);
-      return { title, ...structured, ...schedule,
+      return { title, ...structured, ...schedule, ...supportDetails(lines), application: applicationFromLines(lines),
         eligible: text($('.feed-view .overview .cate')) === '주거' };
     },
   },
@@ -114,6 +143,7 @@ export const sources = [
       const applicant = field(lines, /^지원대상\s*[:：]/);
       const branches = detail.find('.btnBox a, a.btn_back').map((_, a) => explicitStatus(text($(a)))).get();
       return { title, ...schedules(lines, yearFrom(title)), status: branches.find(Boolean), applicant: afterLabel(applicant),
+        application: incheonApplication($, detail),
         eligible: !detail.text().includes('전국 청년월세 지원사업') && !/청년\s*월세\s*(한시\s*)?(특별\s*)?지원/.test(title) };
     },
   },
@@ -130,7 +160,7 @@ export const sources = [
       const title = text($('.content_in_wrap h5').first());
       const lines = asLines($, $('.ntc_cont_view'));
       const postedYear = Number(text($('.ntc_board_view .top_info_dt span').first()).slice(0, 4));
-      return { title, ...schedules(lines, yearFrom(title) ?? postedYear), ...supportDetails(lines) };
+      return { title, ...schedules(lines, yearFrom(title) ?? postedYear), ...supportDetails(lines), application: applicationFromLines(lines) };
     },
   },
   {
@@ -144,8 +174,8 @@ export const sources = [
     detailUrl: id => url(`${daejeon}/articleView.do`, { commonMenuNo: '8_30_31', searchSeq: id }),
     detail($) {
       const title = text($('h4').filter((_, h) => /청년.*(공고|모집|지원)/.test(text($(h)))).last());
-      const lines = $('p, li').map((_, p) => text($(p))).get().filter(line => line.length < 250);
-      return { title, ...schedules(lines, yearFrom(title)) };
+      const lines = $('main p, main li, #contents p, #contents li').map((_, p) => text($(p))).get().filter(line => line && line.length < 250);
+      return { title, ...schedules(lines, yearFrom(title)), ...supportDetails(lines), application: applicationFromLines(lines) };
     },
   },
   {
@@ -159,9 +189,9 @@ export const sources = [
     detailUrl: id => url(jeju, { act: 'view', qType: 'title', seq: id }),
     detail($) {
       const title = text($('.board-view .title, .board_view .title, p.subject, p.title').first()) || text($('title')).split(' > ').at(-1)?.replace(/\s+제주특별자치도개발공사$/, '');
-      const lines = $('p').map((_, p) => text($(p))).get();
+      const lines = $('p').map((_, p) => text($(p))).get().filter(Boolean);
       const postedYear = Number(lines.find(line => /작성일\s*[:：]\s*20\d{2}/.test(line))?.match(/20\d{2}/)?.[0]);
-      return { title, ...schedules(lines, yearFrom(title) || postedYear) };
+      return { title, ...schedules(lines, yearFrom(title) || postedYear), application: jejuApplication(lines) };
     },
   },
   {
@@ -177,7 +207,7 @@ export const sources = [
     detail($) {
       const title = text($('th.bbs_tit').first());
       const lines = asLines($, $('td.view_content'));
-      return { title, ...schedules(lines, yearFrom(title)), ...supportDetails(lines) };
+      return { title, ...schedules(lines, yearFrom(title)), ...supportDetails(lines), application: applicationFromLines(lines) };
     },
   },
   {

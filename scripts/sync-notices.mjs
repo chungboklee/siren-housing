@@ -2,6 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { koreaDay } from '../src/schedule.mjs';
 import { categoryFor, clean, fetchPage, period, sources } from './notice-sources.mjs';
+import { mergeApplication } from './application-details.mjs';
 
 const noticesFile = new URL('../data/notices.json', import.meta.url);
 const daejeonApplication = 'https://daejeonyouthportal.kr/content/CT_000000000059/cntPage.do?category=19&commonMenuNo=438_323_514_521&section=1';
@@ -59,7 +60,7 @@ function makeNotice(adapter, item, observed, today) {
     : adapter.region === 'seoul' ? title.match(/^([가-힣]+구)(?:청|1인가구지원센터)/)?.[1] : undefined);
   const benefit = { monthly: '월세·주거비 지원', moving: '이사비·중개보수 지원', interest: '임차보증금 대출이자 지원',
     purchase: '주택구입 대출이자 지원', rentals: '청년 임대주택 공급' };
-  return {
+  const notice = {
     slug: `${adapter.key}-notice-${item.id}`, title, region: item.region ?? adapter.region, ...(municipality ? { municipality } : {}),
     category, agency: adapter.agency, source: item.source, opens: observed.opens, closes: observed.closes,
     ...(observed.status === 'closed' ? { availability: 'closed' } : {}),
@@ -68,6 +69,8 @@ function makeNotice(adapter, item, observed, today) {
     criteria: [observed.applicant?.slice(0, 300) || '신청 자격과 제출 서류는 공식 공고에서 확인하세요.'],
     note: '지원 금액, 세부 조건, 접수 방법은 공식 공고를 확인하세요.',
   };
+  mergeApplication(notice, observed);
+  return notice;
 }
 
 export async function sync(notices, { fetch = fetchPage, today = koreaDay(), sourcesToCheck = sources } = {}) {
@@ -144,10 +147,21 @@ export async function sync(notices, { fetch = fetchPage, today = koreaDay(), sou
       }
     }
     for (const [notice, { observed, item }] of changes) {
+      const original = item.id === sourceId(adapter, notice.source);
+      const detailsChanged = original && mergeApplication(notice, observed);
       if (notice.scheduleUpdate && notice.scheduleSource && sourceId(adapter, notice.scheduleSource) &&
           sourceId(adapter, notice.scheduleSource) !== sourceId(adapter, notice.source) &&
-          item.id === sourceId(adapter, notice.source)) continue;
-      if (applySchedule(notice, observed, today, item.source)) updated += 1;
+          original) {
+        if (!detailsChanged) continue;
+      } else if (applySchedule(notice, observed, today, item.source)) {
+        updated += 1;
+        continue;
+      }
+      if (detailsChanged) {
+        notice.updatedOn = today;
+        notice.verifiedOn = today;
+        updated += 1;
+      }
     }
   }));
 
