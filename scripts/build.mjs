@@ -1,4 +1,5 @@
 import { mkdir, readFile, writeFile, copyFile, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { compareSchedules, noticeState, states } from '../src/schedule.mjs';
 
 const title = '사이렌 주거';
@@ -42,6 +43,14 @@ function dateTime(value, withYear) {
 
 function path(notice) {
   return `/notices/${notice.slug}/`;
+}
+
+function feedItem(notice) {
+  const description = [notice.summary, notice.scheduleUpdate, notice.closes && `공고상 마감 ${date(notice.closes)}`].filter(Boolean).join(' ');
+  const revision = notice.scheduleUpdate
+    ? '-' + createHash('sha256').update(JSON.stringify([notice.opens, notice.closes, notice.availability])).digest('hex').slice(0, 12)
+    : '';
+  return `<item><title>${escape(notice.title)}</title><link>${origin}${path(notice)}</link><guid isPermaLink="false">${escape(`${notice.slug}-${notice.updatedOn}${revision}`)}</guid><pubDate>${new Date(notice.updatedOn + 'T00:00:00+09:00').toUTCString()}</pubDate><description>${escape(description)}</description></item>`;
 }
 
 function locality(notice) {
@@ -176,6 +185,7 @@ for (const notice of notices) {
         <div class="detail-category"><span>${escape(locationLabel(notice))} · ${categories[notice.category]}</span>${status(notice)}</div>
         <h1>${escape(notice.title)}</h1><p class="lead">${escape(notice.summary)}</p>
         <dl class="facts"><div><dt>지원 내용</dt><dd>${escape(notice.benefit)}</dd></div><div><dt>공고상 신청 기간</dt><dd>${applicationPeriod(notice)}</dd></div></dl>
+        ${notice.scheduleUpdate ? `<p class="note">${escape(notice.scheduleUpdate)}</p>` : ''}
         <h2>신청 대상</h2><ul class="criteria">${notice.criteria.map(item => `<li>${escape(item)}</li>`).join('')}</ul>
         <p class="note">${escape(notice.note)}</p>
         <div class="source-links"><a class="action" href="${escape(notice.source)}">공식 공고 보기 <span aria-hidden="true">↗</span></a>${notice.scheduleSource ? `<a href="${escape(notice.scheduleSource)}">공식 접수 일정 확인 ↗</a>` : ''}</div>
@@ -187,7 +197,7 @@ for (const [region, file] of [['all', 'rss.xml'], ['seoul', 'rss/seoul.xml'], ['
   const name = region === 'all' ? '전체' : regions[region];
   const items = notices.filter(notice => region === 'all' || notice.region === region || notice.region === 'national')
     .sort((first, second) => second.updatedOn.localeCompare(first.updatedOn))
-    .map(notice => `<item><title>${escape(notice.title)}</title><link>${origin}${path(notice)}</link><guid isPermaLink="false">${escape(`${notice.slug}-${notice.updatedOn}`)}</guid><pubDate>${new Date(notice.updatedOn + 'T00:00:00+09:00').toUTCString()}</pubDate><description>${escape(notice.summary + (notice.closes ? ` 공고상 마감 ${date(notice.closes)}` : ''))}</description></item>`);
+    .map(feedItem);
   await emit(file, `<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>${title} · ${name}</title><link>${origin}/</link><atom:link href="${origin}/${file}" rel="self" type="application/rss+xml"/><description>청년 주거지원 공고 및 변경 정보</description><language>ko</language>${items.join('')}</channel></rss>`);
 }
 
