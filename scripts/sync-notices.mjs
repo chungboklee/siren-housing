@@ -54,12 +54,13 @@ function makeNotice(adapter, item, observed, today) {
   if (!category || !observed.opens || !observed.closes || observed.eligible === false) return;
   if (observed.closes < today.slice(0, 4) + '-01-01') return;
   if (adapter.key === 'seoul' && />\s*안내$/.test(title) && !/20\d{2}/.test(title)) return;
-  const municipality = adapter.region === 'incheon' ? title.match(/^\(([가-힣]+[구군])\)/)?.[1]
-    : adapter.region === 'seoul' ? title.match(/^([가-힣]+구)(?:청|1인가구지원센터)/)?.[1] : undefined;
+  if (adapter.key === 'lh' && !item.region && !/전국/.test(title)) return;
+  const municipality = adapter.municipality ?? (adapter.region === 'incheon' ? title.match(/^\(([가-힣]+[구군])\)/)?.[1]
+    : adapter.region === 'seoul' ? title.match(/^([가-힣]+구)(?:청|1인가구지원센터)/)?.[1] : undefined);
   const benefit = { monthly: '월세·주거비 지원', moving: '이사비·중개보수 지원', interest: '임차보증금 대출이자 지원',
     purchase: '주택구입 대출이자 지원', rentals: '청년 임대주택 공급' };
   return {
-    slug: `${adapter.key}-notice-${item.id}`, title, region: adapter.region, ...(municipality ? { municipality } : {}),
+    slug: `${adapter.key}-notice-${item.id}`, title, region: item.region ?? adapter.region, ...(municipality ? { municipality } : {}),
     category, agency: adapter.agency, source: item.source, opens: observed.opens, closes: observed.closes,
     ...(observed.status === 'closed' ? { availability: 'closed' } : {}),
     verifiedOn: today, updatedOn: today, benefit: observed.benefit?.slice(0, 220) || benefit[category],
@@ -133,8 +134,9 @@ export async function sync(notices, { fetch = fetchPage, today = koreaDay(), sou
       }
     }
     for (const { observed, item } of corrections) {
+      const title = comparableTitle(observed.title);
       const matches = related.filter(notice => notice.scheduleSource === item.source ||
-        comparableTitle(notice.title) === comparableTitle(observed.title));
+        title === comparableTitle(changes.get(notice)?.observed.title ?? notice.title));
       if (matches.length === 1 && (observed.closes || observed.status)) {
         const current = changes.get(matches[0]);
         if (current && current.item.source !== matches[0].source && Number(current.item.id) > Number(item.id)) continue;
@@ -179,7 +181,9 @@ async function main() {
   const additions = notices.filter(notice => !originalSlugs.has(notice.slug)).sort((first, second) => first.slug.localeCompare(second.slug));
   if (write && (added || updated)) {
     const ordered = [...notices.filter(notice => originalSlugs.has(notice.slug)), ...additions];
-    await writeFile(noticesFile, JSON.stringify(ordered, null, 2) + '\n', 'utf8');
+    const json = JSON.stringify(ordered, null, 2).replace(/("criteria": )\[\n((?:      "[^\n]*\n)+)    \]/g,
+      (_, prefix, entries) => prefix + '[' + entries.trim().split('\n').map(line => line.trim()).join(' ') + ']');
+    await writeFile(noticesFile, json + '\n', 'utf8');
   }
   for (const notice of additions) console.log(`New: ${notice.slug} (${notice.opens} ~ ${notice.closes})`);
 }

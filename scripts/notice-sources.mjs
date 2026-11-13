@@ -52,6 +52,12 @@ const chungnam = 'https://youth.chungnam.go.kr/web/main/bbs/cnyouth_notice';
 const daejeon = 'https://www.daejeonyouthportal.kr/board/BBSMSTR_000000000239';
 const jeju = 'https://www.jpdc.co.kr/open/news/notice.htm';
 const lh = 'https://apply.lh.or.kr/lhapply/apply/wt/wrtanc';
+const gwangyang = 'https://gwangyang.go.kr/saeol/gosi.es';
+const lhRegions = {
+  서울: 'seoul', 부산: 'busan', 대구: 'daegu', 인천: 'incheon', 광주: 'jeonnam', 대전: 'daejeon',
+  울산: 'ulsan', 세종: 'sejong', 경기: 'gyeonggi', 강원: 'gangwon', 충북: 'chungbuk',
+  충남: 'chungnam', 전북: 'jeonbuk', 전남: 'jeonnam', 경북: 'gyeongbuk', 경남: 'gyeongnam', 제주: 'jeju',
+};
 
 function schedules(lines, year) {
   const range = field(lines, /^(?:(?:[○ㅇ■□▪•※-]|[가-하]\.)\s*)?(?:신청|접수|모집)\s*(?:기간|접수)\s*[:：]/);
@@ -59,6 +65,13 @@ function schedules(lines, year) {
   return {
     ...period(afterLabel(range) ?? '', year),
     ...(closing && !/가능|예정|경우|이후|시까지|될 수|기한|일시|마감일/.test(closing) ? { status: 'closed' } : {}),
+  };
+}
+
+function supportDetails(lines) {
+  return {
+    applicant: afterLabel(field(lines, /^[○ㅇ□-]?\s*지원\s*대상\s*[:：]/)),
+    benefit: afterLabel(field(lines, /^[○ㅇ□-]?\s*지원\s*내용\s*[:：]/)),
   };
 }
 
@@ -117,11 +130,7 @@ export const sources = [
       const title = text($('.content_in_wrap h5').first());
       const lines = asLines($, $('.ntc_cont_view'));
       const postedYear = Number(text($('.ntc_board_view .top_info_dt span').first()).slice(0, 4));
-      return {
-        title, ...schedules(lines, yearFrom(title) ?? postedYear),
-        applicant: afterLabel(field(lines, /^[○ㅇ-]?\s*지원\s*대상\s*[:：]/)),
-        benefit: afterLabel(field(lines, /^[○ㅇ-]?\s*지원\s*내용\s*[:：]/)),
-      };
+      return { title, ...schedules(lines, yearFrom(title) ?? postedYear), ...supportDetails(lines) };
     },
   },
   {
@@ -156,29 +165,47 @@ export const sources = [
     },
   },
   {
+    key: 'gwangyang', region: 'jeonnam', municipality: '광양시', agency: '광양시청', host: 'gwangyang.go.kr', idParam: 'seq',
+    lists: ['1', '2', '3'].map(nPage => url(gwangyang, { act: 'list', mid: 'a10909020000', nPage })),
+    empty: $ => $('tbody').text().includes('게시물이 존재하지 않습니다.'),
+    list($) {
+      return $('a[href*="act=view"][href*="seq="]').map((_, a) => ({
+        id: $(a).attr('href')?.match(/[?&]seq=(\d+)/)?.[1], title: text($(a)),
+      })).get();
+    },
+    detailUrl: seq => url(gwangyang, { act: 'view', mid: 'a10909020000', seq }),
+    detail($) {
+      const title = text($('th.bbs_tit').first());
+      const lines = asLines($, $('td.view_content'));
+      return { title, ...schedules(lines, yearFrom(title)), ...supportDetails(lines) };
+    },
+  },
+  {
     key: 'lh', region: 'national', agency: '한국토지주택공사', host: 'apply.lh.or.kr', idParam: 'panId',
-    lists: ['17', '26'].map(aisTpCd => url(`${lh}/selectWrtancList.do`, {
-      aisTpCd, srchAisTpCd: aisTpCd, srchUppAisTpCd: '13', uppAisTpaCd: '13', listCo: '50', mi: '1026',
-    })),
+    lists: ['17', '26'].flatMap(aisTpCd => ['공고중', '접수마감'].map(panSs => url(`${lh}/selectWrtancList.do`, {
+      aisTpCd, srchAisTpCd: aisTpCd, srchUppAisTpCd: '13', uppAisTpaCd: '13', listCo: '50', mi: '1026', panSs,
+    }))),
+    empty: $ => $('td[colspan="9"]').text().includes('검색하신 결과가 없습니다.'),
     list($) {
       return $('a.wrtancInfoBtn[data-id1]').map((_, a) => {
         const link = $(a);
         const cells = link.closest('tr').children('td');
         const id = link.attr('data-id1');
+        const coverage = text(cells.eq(3));
+        const region = lhRegions[coverage.slice(0, 2)];
         return {
           id, title: text(link.clone().find('em').remove().end()),
           source: url(`${lh}/selectWrtancInfo.do`, { aisTpCd: link.attr('data-id4'),
             ccrCnntSysDsCd: link.attr('data-id2'), panId: id, uppAisTpCd: link.attr('data-id3') }),
-          period: period(`${text(cells.eq(5))} ~ ${text(cells.eq(6))}`), status: explicitStatus(text(cells.eq(7))),
+          status: explicitStatus(text(cells.eq(7))),
+          region: region && !/외|,|·/.test(coverage) ? region : undefined,
         };
       }).get();
     },
     detail($, html, item) {
       const start = html.match(/var ustAcpStDttm = '([^']+)'/)?.[1];
       const end = html.match(/var ustAcpClsgDttm = '([^']+)'/)?.[1];
-      const detailPeriod = start && end ? period(`${start} ~ ${end}`) : undefined;
-      const agrees = ['opens', 'closes'].every(key => detailPeriod?.[key]?.slice(0, 10) === item.period?.[key]?.slice(0, 10));
-      const schedule = agrees ? detailPeriod ?? item.period : item.period ?? detailPeriod;
+      const schedule = start && end ? period(`${start} ~ ${end}`) : undefined;
       return { title: item.title, ...(schedule ?? item.period), status: item.status };
     },
   },
