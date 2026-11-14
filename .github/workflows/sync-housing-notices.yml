@@ -2,11 +2,14 @@ name: Sync official housing notices
 
 on:
   schedule:
-    - cron: '17 22 * * *'
+    - cron: '17 22 * * *' # 07:17 KST
+    - cron: '47 22 * * *' # 07:47 KST
+    - cron: '13 0 * * *' # 09:13 KST
   workflow_dispatch:
 
 permissions:
   contents: write
+  actions: read
 
 concurrency:
   group: siren-notice-sync
@@ -17,19 +20,44 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+      - name: Check whether today's scheduled collection already succeeded
+        id: due
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_RUN: ${{ github.run_id }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" = schedule ]; then
+            since=$(date -u -d "$(TZ=Asia/Seoul date +%F) 00:00:00 +0900" '+%Y-%m-%dT%H:%M:%SZ')
+            prior=$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/sync-housing-notices.yml/runs" \
+              -f branch=main -f event=schedule -f status=success -f "created=>=$since" \
+              --jq ".workflow_runs | map(select(.id != $CURRENT_RUN)) | length")
+            if [ "$prior" -gt 0 ]; then
+              echo "Today's scheduled collection already succeeded (KST)."
+              echo "run=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          echo "run=true" >> "$GITHUB_OUTPUT"
+      - if: steps.due.outputs.run == 'true'
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           ref: main
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - if: steps.due.outputs.run == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
-      - run: npm ci --ignore-scripts --no-audit --no-fund
-      - run: node scripts/sync-notices.mjs --write
+      - if: steps.due.outputs.run == 'true'
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - if: steps.due.outputs.run == 'true'
+        run: node scripts/sync-notices.mjs --write
       - name: Build and validate site, RSS, and sitemap
+        if: steps.due.outputs.run == 'true'
         env:
           SIREN_SITE_URL: https://siren-housing.siren-kr.workers.dev
         run: npm run build
       - name: Publish verified changes to main
+        if: steps.due.outputs.run == 'true'
         run: |
           if git diff --quiet -- data/notices.json; then
             echo "No notice changes to publish."
