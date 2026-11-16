@@ -16,6 +16,7 @@ const now = new Date();
 const publicOrigin = process.env.SIREN_SITE_URL;
 const origin = publicOrigin ? httpsUrl(publicOrigin).origin : 'http://127.0.0.1:4173';
 const verifiedOrigin = 'https://siren-housing.siren-kr.workers.dev';
+const analyticsId = 'G-JFDYNM2MXE';
 const email = process.env.SIREN_EMAIL_SUBSCRIBE_URL;
 const notices = JSON.parse(await readFile(new URL('../data/notices.json', import.meta.url), 'utf8'));
 const dist = new URL('../dist/', import.meta.url);
@@ -114,6 +115,9 @@ function page({ heading, summary, route, body }) {
     ? `<meta name="google-site-verification" content="aS64T4W4MQjEji0JKbEtHKuX8DraOS70bNURQCgNlQE">
   <meta name="naver-site-verification" content="a7bf08f23b3a75b769bc6d89c729947d8a22dc72">`
     : '';
+  const analytics = origin === verifiedOrigin
+    ? `<script type="module" src="/assets/analytics.mjs" data-ga-id="${analyticsId}" data-ga-origin="${verifiedOrigin}"></script>`
+    : '';
   return `<!doctype html>
 <html lang="ko">
 <head>
@@ -127,6 +131,7 @@ function page({ heading, summary, route, body }) {
   <link rel="alternate" type="application/rss+xml" title="${title} RSS" href="/rss.xml">
   <link rel="stylesheet" href="/assets/styles.css">
   <script type="module" src="/assets/filter.mjs"></script>
+  ${analytics}
 </head>
 <body>
   <a class="skip" href="#main">본문으로 바로가기</a>
@@ -164,13 +169,13 @@ function select(label, name, choices, anyLabel, visible = false) {
 function applicationDetails(notice) {
   const { method, applicationUrl, steps, documents, selection, announcement, contact, conditions, detailSource } = notice.application ?? {};
   const list = (items, tag) => `<${tag} class="criteria">${items.map(item => `<li>${escape(item)}</li>`).join('')}</${tag}>`;
-  const detailsLink = applicationUrl ? ` <a href="${escape(applicationUrl)}">공식 접수처 ↗</a>` : '';
+  const detailsLink = applicationUrl ? ` <a href="${escape(applicationUrl)}" data-analytics-event="application_link_click">공식 접수처 ↗</a>` : '';
   return `
     <section class="application-section" aria-labelledby="how-to-apply">
       <h2 id="how-to-apply">신청 방법과 절차</h2>
-      ${method ? `<p>${escape(method)}${detailsLink}</p>` : ''}
+      ${method || detailsLink ? `<p>${method ? escape(method) : ''}${detailsLink}</p>` : ''}
       ${steps?.length ? list(steps, 'ol') : ''}
-      ${method || steps?.length ? '' : '<p>접수처와 신청 절차는 공식 공고에서 확인하세요.</p>'}
+      ${method || detailsLink || steps?.length ? '' : '<p>접수처와 신청 절차는 공식 공고에서 확인하세요.</p>'}
     </section>
     <section class="application-section" aria-labelledby="documents">
       <h2 id="documents">주요 제출 서류</h2>
@@ -226,7 +231,7 @@ await emit('index.html', page({ heading: `청년 주거지원 공고 | ${title}`
     </section>
     <section class="subscribe" id="subscribe" aria-labelledby="subscribe-title">
       <h2 id="subscribe-title">새 공고 구독</h2>
-      <div class="feed-links"><a href="/rss.xml">전체 RSS</a><details><summary>지역별 RSS</summary><div class="regional-feeds">${feedRegions.map(region => `<a href="/rss/${region}.xml">${regions[region]} RSS</a>`).join('')}</div></details>${email ? `<a href="${escape(email)}">이메일</a>` : ''}</div>
+      <div class="feed-links"><a href="/rss.xml" data-analytics-event="rss_link_click" data-rss-region="all">전체 RSS</a><details><summary>지역별 RSS</summary><div class="regional-feeds">${feedRegions.map(region => `<a href="/rss/${region}.xml" data-analytics-event="rss_link_click" data-rss-region="${region}">${regions[region]} RSS</a>`).join('')}</div></details>${email ? `<a href="${escape(email)}">이메일</a>` : ''}</div>
     </section>
   </main>` }));
 
@@ -241,7 +246,7 @@ for (const notice of notices) {
         ${notice.scheduleUpdate ? `<p class="note">${escape(notice.scheduleUpdate)}</p>` : ''}
         <h2>신청 대상</h2><ul class="criteria">${notice.criteria.map(item => `<li>${escape(item)}</li>`).join('')}</ul>
         <p class="note">${escape(notice.note)}</p>
-        <div class="source-links"><a class="action" href="${escape(notice.source)}">공식 공고 보기 <span aria-hidden="true">↗</span></a>${notice.scheduleSource ? `<a href="${escape(notice.scheduleSource)}">공식 접수 일정 확인 ↗</a>` : ''}</div>
+        <div class="source-links"><a class="action" href="${escape(notice.source)}" data-analytics-event="official_notice_click">공식 공고 보기 <span aria-hidden="true">↗</span></a>${notice.scheduleSource ? `<a href="${escape(notice.scheduleSource)}">공식 접수 일정 확인 ↗</a>` : ''}</div>
         ${applicationDetails(notice)}
       </article>
     </main>` }));
@@ -258,7 +263,7 @@ for (const [region, file] of [['all', 'rss.xml'], ...feedRegions.map(region => [
 await emit('robots.txt', publicOrigin ? `User-agent: *\nAllow: /\nSitemap: ${origin}/sitemap.xml\n` : 'User-agent: *\nDisallow: /\n');
 await emit('sitemap.xml', `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${origin}/</loc></url>${notices.map(notice => `<url><loc>${origin}${path(notice)}</loc><lastmod>${notice.updatedOn}</lastmod></url>`).join('')}</urlset>`);
 await mkdir(new URL('assets/', dist), { recursive: true });
-for (const asset of ['styles.css', 'filter.mjs', 'schedule.mjs', 'eligibility.mjs']) {
+for (const asset of ['styles.css', 'filter.mjs', 'schedule.mjs', 'eligibility.mjs', 'analytics.mjs']) {
   await copyFile(new URL(`../src/${asset}`, import.meta.url), new URL(`assets/${asset}`, dist));
 }
 console.log(`Built ${notices.length} notices and ${feedRegions.length + 1} RSS feeds.`);
