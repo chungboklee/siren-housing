@@ -15,14 +15,11 @@ function startAnalytics(id) {
 
   gtag('js', new Date());
   gtag('config', id, {
-    send_page_view: false,
     page_location: pageLocation,
     page_referrer: pageReferrer,
     allow_google_signals: false,
     allow_ad_personalization_signals: false,
   });
-  gtag('event', 'page_view');
-
   function trackLink(event) {
     if (event.type === 'auxclick' && event.button !== 1) return;
     const link = event.target.closest?.('a[data-analytics-event]');
