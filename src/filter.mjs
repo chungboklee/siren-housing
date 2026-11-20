@@ -22,6 +22,8 @@ if (controls) {
   }));
   rows.sort(({ schedule: first }, { schedule: second }) => compareSchedules(first.state, first.closes, second.state, second.closes));
   list.append(...rows.map(({ row }) => row));
+  const openCount = document.querySelector('#open-notice-count');
+  if (openCount) openCount.textContent = `${rows.filter(({ schedule }) => schedule.state === 'open').length}건`;
   const result = document.querySelector('#results');
   const empty = document.querySelector('#empty');
   const emptyRegion = document.querySelector('#empty-region');

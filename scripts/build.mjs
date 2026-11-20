@@ -4,7 +4,7 @@ import { compareSchedules, noticeState, states } from '../src/schedule.mjs';
 import { applicationChannels, audiences } from '../src/eligibility.mjs';
 
 const title = '사이렌 주거';
-const description = '지자체 청년 월세·이사비·보증금 이자·임대주택 공고를 지역별로 찾고 공식 신청 일정을 확인하세요.';
+const description = '지금 신청할 수 있는 청년 월세·보증금 이자·임대주택 공고를 찾고, 지역별 신청 조건과 공식 접수처를 확인하세요.';
 const regions = {
   national: '전국', seoul: '서울', busan: '부산', daegu: '대구', incheon: '인천',
   daejeon: '대전', ulsan: '울산', sejong: '세종', gyeonggi: '경기',
@@ -19,6 +19,7 @@ const verifiedOrigin = 'https://siren-housing.siren-kr.workers.dev';
 const analyticsId = 'G-JFDYNM2MXE';
 const email = process.env.SIREN_EMAIL_SUBSCRIBE_URL;
 const notices = JSON.parse(await readFile(new URL('../data/notices.json', import.meta.url), 'utf8'));
+const guides = JSON.parse(await readFile(new URL('../data/guides.json', import.meta.url), 'utf8'));
 const dist = new URL('../dist/', import.meta.url);
 const slugs = new Set();
 const feedRegions = Object.keys(regions).filter(region => region !== 'national');
@@ -109,8 +110,18 @@ for (const notice of notices) {
 }
 if (email) httpsUrl(email);
 
-function page({ heading, summary, route, body }) {
-  const canonical = publicOrigin ? `<link rel="canonical" href="${escape(origin + route)}">` : '<meta name="robots" content="noindex">';
+function guidePath(guide) {
+  return `/guides/${guide.slug}/`;
+}
+
+function breadcrumb(trail, heading) {
+  const links = trail.map(([name, href]) => `<li><a href="${href}">${escape(name)}</a></li>`);
+  return `<nav class="breadcrumb" aria-label="현재 위치"><ol>${links.join('')}<li aria-current="page">${escape(heading)}</li></ol></nav>`;
+}
+
+function page({ heading, summary, route, body, trail = [], pageName = heading, feed = '/rss.xml' }) {
+  const url = origin + route;
+  const canonical = publicOrigin ? `<link rel="canonical" href="${escape(url)}">` : '<meta name="robots" content="noindex">';
   const verification = origin === verifiedOrigin && route === '/'
     ? `<meta name="google-site-verification" content="aS64T4W4MQjEji0JKbEtHKuX8DraOS70bNURQCgNlQE">
   <meta name="naver-site-verification" content="a7bf08f23b3a75b769bc6d89c729947d8a22dc72">`
@@ -118,6 +129,21 @@ function page({ heading, summary, route, body }) {
   const analytics = origin === verifiedOrigin
     ? `<script type="module" src="/assets/analytics.mjs" data-ga-id="${analyticsId}" data-ga-origin="${verifiedOrigin}"></script>`
     : '';
+  const schema = route === '/' ? { '@type': 'WebSite', name: title, url, inLanguage: 'ko' }
+    : {
+        '@type': 'BreadcrumbList',
+        itemListElement: [...trail, [pageName, route]].map(([name, href], i) => ({
+          '@type': 'ListItem', position: i + 1, name, item: origin + href,
+        })),
+      };
+  const metadata = publicOrigin ? `
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="ko_KR">
+  <meta property="og:site_name" content="${escape(title)}">
+  <meta property="og:title" content="${escape(heading)}">
+  <meta property="og:description" content="${escape(summary)}">
+  <meta property="og:url" content="${escape(url)}">
+  <script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', ...schema }).replaceAll('<', '\\u003c')}</script>` : '';
   return `<!doctype html>
 <html lang="ko">
 <head>
@@ -128,10 +154,11 @@ function page({ heading, summary, route, body }) {
   <title>${escape(heading)}</title>
   ${canonical}
   ${verification}
-  <link rel="alternate" type="application/rss+xml" title="${title} RSS" href="/rss.xml">
+  ${metadata}
+  <link rel="alternate" type="application/rss+xml" title="${title} RSS" href="${feed}">
   <link rel="stylesheet" href="/assets/styles.css">
-  <script type="module" src="/assets/filter.mjs"></script>
   ${analytics}
+  <script type="module" src="/assets/filter.mjs"></script>
 </head>
 <body>
   <a class="skip" href="#main">본문으로 바로가기</a>
@@ -144,14 +171,14 @@ function page({ heading, summary, route, body }) {
 </html>`;
 }
 
-function noticeRow(notice) {
+function noticeRow(notice, headingTag = 'h2') {
   const { age, audiences: groups, channels } = notice.application ?? {};
   const keywords = [notice.summary, ...notice.criteria, ...(groups ?? []).map(key => audiences[key]), ...(channels ?? []).map(key => applicationChannels[key])].join(' ');
   return `<article class="notice" data-region="${notice.region}" data-locality="${escape(locality(notice))}" data-category="${notice.category}" data-age="${age?.join(',') ?? ''}" data-audiences="${groups?.join(',') ?? ''}" data-channels="${channels?.join(',') ?? ''}" data-updated="${notice.updatedOn}" data-keywords="${escape(keywords)}">
     <a class="notice-link" href="${path(notice)}" aria-labelledby="${notice.slug}-title">
       <div class="notice-main">
         <p class="notice-category">${escape(locationLabel(notice))} · ${categories[notice.category]}</p>
-        <h2 id="${notice.slug}-title">${escape(notice.title)}</h2>
+        <${headingTag} id="${notice.slug}-title">${escape(notice.title)}</${headingTag}>
         <p class="benefit">${escape(notice.benefit)}${age ? ` · 만 ${age[0]}~${age[1]}세` : ''}</p>
         <p class="notice-age-unknown" hidden>연령 조건은 공고에서 확인</p>
       </div>
@@ -187,7 +214,7 @@ function applicationDetails(notice) {
       ${contact ? `<div><dt>문의</dt><dd>${escape(contact)}</dd></div>` : ''}
     </dl>` : ''}
     ${conditions?.length ? `<section class="application-section"><h2>추가로 확인할 조건</h2>${list(conditions, 'ul')}</section>` : ''}
-    ${detailSource && detailSource !== applicationUrl ? `<p class="note"><a href="${escape(detailSource)}">공식 신청 안내 및 서류 확인 ↗</a></p>` : ''}`;
+    ${detailSource && detailSource !== applicationUrl ? `<p class="note"><a href="${escape(detailSource)}">공식 신청 안내 ↗</a></p>` : ''}`;
 }
 
 const regionChoices = {};
@@ -204,12 +231,27 @@ const ordered = [...notices].sort((first, second) => compareSchedules(
   noticeState(first.opens, first.closes, now, first.availability), first.closes,
   noticeState(second.opens, second.closes, now, second.availability), second.closes,
 ));
+const siteTrail = [[title, '/']];
+const guideNotices = new Map(guides.map(guide => [guide, ordered.filter(notice =>
+  (!guide.region || notice.region === guide.region) &&
+  (!guide.agency || notice.agency === guide.agency) &&
+  (!guide.category || notice.category === guide.category) &&
+  (guide.titleTerms ?? []).every(term => notice.title.replace(/\s+/g, '').includes(term)))]));
+const activeCount = notices.filter(notice => noticeState(notice.opens, notice.closes, now, notice.availability) === 'open').length;
+const summaries = new Map();
+for (const { summary } of notices) summaries.set(summary, (summaries.get(summary) ?? 0) + 1);
 
 await rm(dist, { recursive: true, force: true });
-await emit('index.html', page({ heading: `청년 주거지원 공고 | ${title}`, summary: description, route: '/', body: `
+await emit('index.html', page({ heading: `청년 주거지원 공고와 신청 방법 | ${title}`, summary: description, route: '/', body: `
   <main class="wrap programs" id="main">
+    <h1>청년 주거지원</h1>
+    <p class="lead">월세·보증금 이자·임대주택 공고를 찾아보고, 신청 조건과 공식 접수처를 확인하세요.</p>
+    <nav class="home-links" aria-label="접수 공고와 신청 안내">
+      <a class="open-notices-link" href="/?status=open#programs">접수 중 <span id="open-notice-count">${activeCount}건</span></a>
+      ${guides.map(guide => `<a href="${guidePath(guide)}">${escape(guide.title)}</a>`).join('')}
+    </nav>
     <section id="programs" aria-labelledby="program-title">
-      <h1 id="program-title">청년 주거지원</h1>
+      <h2 id="program-title" class="sr-only">청년 주거지원 공고</h2>
       <form id="filters" hidden aria-label="공고 필터">
         <div class="search-field"><label class="sr-only" for="notice-search">공고 검색</label><input id="notice-search" name="q" type="search" maxlength="80" placeholder="공고명 또는 지역 검색"></div>
         <div class="filters">${select('지역 및 시·군·구', 'region', regionChoices, '모든 지역')}${select('지원 유형', 'category', categories, '모든 지원')}${select('접수 상태', 'status', states, '접수 상태')}</div>
@@ -235,10 +277,41 @@ await emit('index.html', page({ heading: `청년 주거지원 공고 | ${title}`
     </section>
   </main>` }));
 
+for (const guide of guides) {
+  const feed = guide.region ? `/rss/${guide.region}.xml` : '/rss.xml';
+  const guideRows = guideNotices.get(guide);
+  await emit(`.${guidePath(guide)}index.html`, page({
+    heading: `${guide.title} | ${title}`, summary: guide.summary, route: guidePath(guide), trail: siteTrail, pageName: guide.title, feed,
+    body: `
+      <main class="wrap detail" id="main">
+        ${breadcrumb(siteTrail, guide.title)}
+        <article>
+          <h1>${escape(guide.title)}</h1>
+          <p class="lead">${escape(guide.intro)}</p>
+          <section class="application-section" aria-labelledby="guide-notices">
+            <h2 id="guide-notices">모집 공고와 접수 상태</h2>
+            ${guideRows.length ? `<div class="notice-list">${guideRows.map(notice => noticeRow(notice, 'h3')).join('')}</div>`
+              : '<p class="note">현재 등록된 모집 공고가 없습니다.</p>'}
+          </section>
+          ${guide.sections.map(section => `<section class="application-section">
+            <h2>${escape(section.heading)}</h2>
+            <p>${escape(section.text)}</p>
+            <p class="note"><a href="${escape(section.source)}">${escape(section.sourceLabel)}</a></p>
+          </section>`).join('')}
+          <p class="note">안내 확인일 ${dateTime(guide.reviewedOn)}</p>
+          <div class="source-links"><a href="${feed}" data-analytics-event="rss_link_click" data-rss-region="${guide.region ?? 'all'}">${guide.region ? regions[guide.region] : '전체'} 새 공고 RSS</a></div>
+        </article>
+      </main>`,
+  }));
+}
+
 for (const notice of notices) {
-  await emit(`.${path(notice)}index.html`, page({ heading: `${notice.title} | ${title}`, summary: notice.summary, route: path(notice), body: `
+  const guide = guides.find(item => guideNotices.get(item).includes(notice));
+  const trail = guide ? [...siteTrail, [guide.title, guidePath(guide)]] : siteTrail;
+  const summary = summaries.get(notice.summary) > 1 ? `${notice.title}. ${notice.benefit}` : notice.summary;
+  await emit(`.${path(notice)}index.html`, page({ heading: `${notice.title} | ${title}`, summary, route: path(notice), trail, pageName: notice.title, body: `
     <main class="wrap detail" id="main">
-      <a class="back" href="/#programs">← 공고 목록</a>
+      ${breadcrumb(trail, notice.title)}
       <article>
         <div class="detail-category"><span>${escape(locationLabel(notice))} · ${categories[notice.category]}</span>${status(notice)}</div>
         <h1>${escape(notice.title)}</h1><p class="lead">${escape(notice.summary)}</p>
@@ -248,6 +321,8 @@ for (const notice of notices) {
         <p class="note">${escape(notice.note)}</p>
         <div class="source-links"><a class="action" href="${escape(notice.source)}" data-analytics-event="official_notice_click">공식 공고 보기 <span aria-hidden="true">↗</span></a>${notice.scheduleSource ? `<a href="${escape(notice.scheduleSource)}">공식 접수 일정 확인 ↗</a>` : ''}</div>
         ${applicationDetails(notice)}
+        <p class="note">${escape(notice.agency)} · 정보 반영일 ${dateTime(notice.updatedOn)}</p>
+        <div class="source-links"><a href="/?status=open#programs">접수 중인 다른 공고 보기</a>${notice.region === 'national' ? '' : `<a href="/rss/${notice.region}.xml" data-analytics-event="rss_link_click" data-rss-region="${notice.region}">${regions[notice.region]} 새 공고 RSS</a>`}</div>
       </article>
     </main>` }));
 }
@@ -261,7 +336,11 @@ for (const [region, file] of [['all', 'rss.xml'], ...feedRegions.map(region => [
 }
 
 await emit('robots.txt', publicOrigin ? `User-agent: *\nAllow: /\nSitemap: ${origin}/sitemap.xml\n` : 'User-agent: *\nDisallow: /\n');
-await emit('sitemap.xml', `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${origin}/</loc></url>${notices.map(notice => `<url><loc>${origin}${path(notice)}</loc><lastmod>${notice.updatedOn}</lastmod></url>`).join('')}</urlset>`);
+const sitemapEntries = [
+  ...guides.map(guide => [guidePath(guide), [guide.reviewedOn, ...guideNotices.get(guide).map(notice => notice.updatedOn)].sort().at(-1)]),
+  ...notices.map(notice => [path(notice), notice.updatedOn]),
+];
+await emit('sitemap.xml', `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${origin}/</loc></url>${sitemapEntries.map(([route, lastmod]) => `<url><loc>${origin}${route}</loc><lastmod>${lastmod}</lastmod></url>`).join('')}</urlset>`);
 await mkdir(new URL('assets/', dist), { recursive: true });
 for (const asset of ['styles.css', 'filter.mjs', 'schedule.mjs', 'eligibility.mjs', 'analytics.mjs']) {
   await copyFile(new URL(`../src/${asset}`, import.meta.url), new URL(`assets/${asset}`, dist));

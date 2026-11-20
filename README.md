@@ -32,3 +32,9 @@ GitHub Actions의 **Sync official housing notices**는 매일 한국 시간 오�
 `SIREN_SITE_URL`에 실제 HTTPS 주소를 설정한 뒤 빌드하면 해당 주소로 RSS와 사이트맵을 생성하고 페이지에 canonical URL을 넣습니다. 주소를 설정하지 않은 미리보기 빌드는 검색 색인을 차단합니다. `wrangler.jsonc`는 Cloudflare Workers 정적 자산 배포에 사용합니다.
 
 `SIREN_EMAIL_SUBSCRIBE_URL`에 실제 이메일 서비스의 HTTPS 구독 주소를 설정하면 구독 링크가 표시됩니다. 파일럿 운영비는 0원이며, V1 운영비 목표는 월 10만 원 이내입니다. 도메인 구매비는 별도입니다.
+
+## 검색과 방문 지표
+
+`data/guides.json`에 공식 출처와 확인일이 있는 신청 안내를 관리합니다. 안내에서 관련 공고를 연결하고 사이트맵에는 안내나 포함된 공고의 실제 갱신일을 사용합니다. 접수 상태는 공고의 일정과 공식 확인 기록을 사용합니다.
+
+목표는 한국 시간 달력 월 기준 GA4 활성 사용자 5만 명입니다. Search Console과 네이버 서치어드바이저에서 색인·노출·검색 클릭을 확인합니다. GA4에서는 랜딩 페이지별 활성 사용자, 공식 접수 링크 클릭, RSS 링크 클릭을 확인합니다. ChatGPT가 붙이는 유입 태그는 `chatgpt.com / referral`로 집계합니다.

@@ -7,6 +7,7 @@ function startAnalytics(id) {
   const pageReferrer = referrer && ['https:', 'http:'].includes(referrer.protocol)
     ? referrer.origin
     : '';
+  const fromChatGPT = new URLSearchParams(location.search).get('utm_source') === 'chatgpt.com';
 
   window.dataLayer = window.dataLayer || [];
   function gtag() {
@@ -17,6 +18,7 @@ function startAnalytics(id) {
   gtag('config', id, {
     page_location: pageLocation,
     page_referrer: pageReferrer,
+    ...(fromChatGPT ? { campaign_source: 'chatgpt.com', campaign_medium: 'referral' } : {}),
     allow_google_signals: false,
     allow_ad_personalization_signals: false,
   });
