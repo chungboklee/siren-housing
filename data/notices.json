@@ -940,5 +940,22 @@
         39
       ]
     }
+  },
+  {
+    "slug": "seoul-notice-76087",
+    "title": "강남구청 <강남구 청년 부동산 중개보수 및 이사비 지원사업>",
+    "region": "seoul",
+    "municipality": "강남구",
+    "category": "moving",
+    "agency": "서울 청년몽땅정보통",
+    "source": "https://youth.seoul.go.kr/infoData/sprtInfo/view.do?key=2309130006&sprtInfoId=76087",
+    "opens": "2026-10-16",
+    "closes": "2026-12-04",
+    "verifiedOn": "2026-11-25",
+    "updatedOn": "2026-11-25",
+    "benefit": "이사비·중개보수 지원",
+    "summary": "서울 청년몽땅정보통에서 확인한 청년 주거지원 공고입니다.",
+    "criteria": ["신청 자격과 제출 서류는 공식 공고에서 확인하세요."],
+    "note": "지원 금액, 세부 조건, 접수 방법은 공식 공고를 확인하세요."
   }
 ]
